@@ -5,9 +5,9 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <signal.h>
+#include <setjmp.h>
 
 #define COLOR_GREEN "\033[0;32;32m"
-#define COLOR_BOLD_GREEN "\e[1;32m"
 #define COLOR_RED "\e[0;31m"
 #define COLOR_YELLOW "\e[0;33m"
 #define COLOR_BOLD_YELLOW "\033[1;33m"
@@ -16,7 +16,6 @@
 #define COLOR_BLUE "\e[0;34m"
 #define COLOR_BOLD_BLUE "\e[1;34m"
 #define COLOR_CYAN "\033[0;36m"
-#define COLOR_PURPLE "\e[0;35m"
 #define COLOR_RESET "\x1b[0m"
 #define CLEAR "\e[2J\e[H"
 
@@ -34,16 +33,49 @@ typedef struct jobs {
     int posicao;
     char status[20];
     char nome[100];
+    pid_t processo;
 } jobs;
 
+static jmp_buf env;
+pid_t pid;
 jobs listaJobs[200];
 int qtdJobs = 0;
 
-int (*builtin_func[]) (char **) = {
-    &cd,
-    &help,
-    &shellExit,
-};
+int imprimeJobs(); // declaraçao da funçao imprimeJobs
+int (*builtin_func[]) (char **) = {&cd, &help, &shellExit, &imprimeJobs};
+
+void killJobs(pid_t id)
+{
+    for (int i = 0 ; i < qtdJobs ; i++)
+    {
+        if (listaJobs[i].processo == id)
+        {
+            kill(id, SIGKILL);
+            strcpy(listaJobs[i].status, "Done");
+        }
+    }
+}
+
+void sigHandler(int signum)
+{
+    if (signum == SIGINT) // Ctrl + C
+    {
+        if (pid != 0)
+        {
+            killJobs(pid);
+            longjmp(env, 42);
+        }
+    }
+    else if (signum == SIGTSTP) // Ctrl + Z
+    {
+        if (pid != 0)
+        {
+            killJobs(pid);
+            longjmp(env, 42);
+        }
+    }
+    fflush(stdout);
+}
 
 int qtdBuiltIns() {
     return sizeof(builtin_str) / sizeof(char *);
@@ -56,7 +88,7 @@ int cd(char **args)
     else
     {
         if (chdir(args[1]) != 0)
-            perror(COLOR_RED "MyShell> " COLOR_RESET);
+            perror(COLOR_RED "MyShell>" COLOR_RESET);
     }
 
     return 1;
@@ -72,43 +104,46 @@ int help(char **args)
 }
 
 int shellExit(char **args) {
-    return 0;
+    exit(0);
 }
 
-void registraJob(char **args)
+void registraJob(char **args, pid_t id)
 {
     jobs job;
+    job.processo = id;
     strcpy(job.nome, args[0]);
-    strcpy(job.status, "Executando\t");
+    strcpy(job.status, "Running\t");
     job.posicao = qtdJobs + 1;
     listaJobs[qtdJobs] = job;
     qtdJobs++;
 }
 
-void imprimeJobs()
+int imprimeJobs()
 {
     for (int i = 0 ; i < qtdJobs ; i++)
-        printf(COLOR_CYAN "entrei aqui [%d]  %s\t%s\n" COLOR_RESET, 
-            listaJobs[qtdJobs].posicao, listaJobs[qtdJobs].status, listaJobs[qtdJobs].nome);
+        printf(COLOR_CYAN "[%d]  Pid: %d   %s\t%s\n" COLOR_RESET, 
+            listaJobs[i].posicao, listaJobs[i].processo, listaJobs[i].status, listaJobs[i].nome);
 
+    return 1;
 }
 
 int launch(char **args)
 {
     int status;
-    pid_t pid = fork();
-    if (pid == 0)
+    pid_t pide;
+    pide = fork();
+    if (pide == 0) // processo filho
     {
         if (execvp(args[0], args) == -1)
-            perror(COLOR_RED "MyShell> " COLOR_RESET);
+            perror(COLOR_RED "MyShell>" COLOR_RESET);
         exit(EXIT_FAILURE);
     }
     else if (pid < 0)
-        perror(COLOR_RED "MyShell> " COLOR_RESET);
+        perror(COLOR_RED "MyShell>" COLOR_RESET);
     else
     {
         do {
-            registraJob(args);
+            registraJob(args, pide);
             waitpid(pid, &status, WUNTRACED);
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
@@ -139,7 +174,7 @@ char *lerLinha()
 
     if (!buffer)
     {
-        fprintf(stderr, "MyShell: Erro de alocacao\n");
+        fprintf(stderr, COLOR_RED "MyShell: Erro de alocacao" COLOR_RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -166,7 +201,7 @@ char *lerLinha()
 
             if (!buffer)
             {
-                fprintf(stderr, "MyShell: Erro de alocacao\n");
+                fprintf(stderr, COLOR_RED "MyShell: Erro de alocacao" COLOR_RESET);
                 exit(EXIT_FAILURE);
             }
         }
@@ -182,7 +217,7 @@ char **splitLinha(char *linha)
 
     if (!tokens)
     {
-        fprintf(stderr, "MyShell: Erro de alocacao");
+        fprintf(stderr, COLOR_RED "MyShell: Erro de alocacao" COLOR_RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -200,7 +235,7 @@ char **splitLinha(char *linha)
             if (!tokens)
             {
                 free(tokensBackup);
-                fprintf(stderr, "MyShell: Erro de alocacao");
+                fprintf(stderr, COLOR_RED "MyShell: Erro de alocacao" COLOR_RESET);
                 exit(EXIT_FAILURE);
             }
         }
@@ -211,19 +246,27 @@ char **splitLinha(char *linha)
     return tokens;
 }
 
-
 void loop()
 {
     char *linha;
     char **args;
     int status;
-    char cwd[200];
+    char cwd[200]; // caminho do diretorio
+    signal(SIGINT, sigHandler);
+    signal(SIGTSTP, sigHandler);
 
     do
     {
+        if (setjmp(env) == 42)
+        {
+            printf("\n");
+            continue;
+        }
         //printf(COLOR_BACKGROUND_YELLOW "MyShell" COLOR_RESET);
-        printf(COLOR_UNDERLINE_YELLOW "MyShell" COLOR_RESET);
-        printf(COLOR_YELLOW ": %s> " COLOR_RESET, getcwd(cwd, sizeof(cwd)));
+        //printf(COLOR_UNDERLINE_YELLOW "MyShell" COLOR_RESET);
+        printf(COLOR_UNDERLINE_YELLOW "MyShell" COLOR_YELLOW ": %s> " COLOR_RESET, 
+            getcwd(cwd, sizeof(cwd)));
+        fflush(stdout);
         linha = lerLinha();
         args = splitLinha(linha);
         // registraJob(args);
@@ -236,6 +279,8 @@ void loop()
 int main()
 {
     //printf(CLEAR);
+    signal(SIGINT, sigHandler);
+    signal(SIGTSTP, sigHandler);
     loop();
     return 0;
 }
