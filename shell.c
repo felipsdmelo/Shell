@@ -25,10 +25,12 @@ int cd(char **args);
 int help(char **args);
 int shellExit(char **args);
 int bg(char **args);
+int fg(char **args);
 
-int imprimeJob(); // declaracao da funçao imprimeJob
-int (*builtin_func[]) (char **) = {&cd, &help, &shellExit, &imprimeJob, &bg};
-char *builtin_str[] = { "cd", "help", "exit", "jobs", "bg"};
+int main(); // declaracao de main
+int imprimeJob(); // declaraçao da funçao imprimeJob
+int (*builtin_func[]) (char **) = {&cd, &help, &shellExit, &imprimeJob, &bg, &fg};
+char *builtin_str[] = { "cd", "help", "exit", "jobs", "bg", "fg"};
 
 typedef struct jobs {
     int posicao;
@@ -59,13 +61,13 @@ void killJob(pid_t id)
 
 void suspendJob(pid_t id)
 {
-    printf("\n");
     for (int i = 0 ; i < qtdJobs ; i++)
     {
         if (listaJobs[i].processo == id)
         {
             kill(id, SIGTSTP);
-            strcpy(listaJobs[i].status, "Stopped");
+            strcpy(listaJobs[i].status, "Stopped  ");
+            main();
         }
     }
 }
@@ -75,16 +77,17 @@ void sigHandler(int signum)
 {
     if (signum == SIGINT) // Ctrl + C
     {
+        killJob(pid);
         if (pid != 0)
-            killJob(pid);
+            return;
+        siglongjmp(buf, 42);
     }
     else if (signum == SIGTSTP) // Ctrl + Z
     {
+        suspendJob(pid);
         if (pid != 0)
-        {
-            kill(pid, SIGTSTP);
-            longjmp(buf, 42); // restaura o processo para o estado que estava quando setjmp foi chamada
-        }
+            return;
+        siglongjmp(buf, 42);
     }
 }
 
@@ -110,17 +113,31 @@ int cd(char **args)
 
 int bg(char **args)
 {
-    int percent = '%';
+    char percent[] = "%";
     if (fork() == 0)
     {
         int aux;
         if (strcmp(args[1], percent) == 0)
-            aux = array[strtol(args + 1, NULL, 10)];
+            aux = array[strtol(*args, NULL, 10)];
         else
-            aux = atoi(args);
+            aux = atoi(*args);
 
         kill(aux, SIGCONT);
     }
+    return 1;
+}
+
+
+int fg(char **args)
+{
+    char percent[] = "%";
+    int aux;
+    if (strcmp(args[1], percent) == 0)
+        aux = array[strtol(*args, NULL, 10)];
+    else
+        aux = atoi(*args);
+
+    kill(aux, SIGCONT);
     return 1;
 }
 
@@ -296,9 +313,9 @@ void inicializa()
     do
     {
         // ponto de volta do salto
-        if (setjmp(buf) == 42)
+        if (sigsetjmp(buf, 42))
         {
-            printf("\nNEYYY NEY NEY ");
+            printf("\n");
             continue;
         }
         printf(COLOR_UNDERLINE_YELLOW "MyShell" COLOR_YELLOW ": %s$ " COLOR_RESET, 
