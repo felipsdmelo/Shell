@@ -2,12 +2,12 @@
 Implementação de uma shell básica em linguagem C com uma interface simples de interação com o usuário para a disciplina de Computadores e Programação da UFRJ.
 
 # Comandos built-in
-    - `help`: lista os comandos built-in implementados
-    - `cd`: muda o diretório corrente
-    - `exit`: fecha a shell
-    - `jobs`: lista jobs correntes e seus status
-    - `bg`: coloca um job em background
-    - `fg`: coloca um job em foreground
+    - help: lista os comandos built-in implementados
+    - cd: muda o diretório corrente
+    - exit: fecha a shell
+    - jobs: lista jobs correntes e seus status
+    - bg: coloca um job em background
+    - fg: coloca um job em foreground
 
 # Compilação e utilização
 Conceda permissão para execução ao arquivo Makefile com o comando:
